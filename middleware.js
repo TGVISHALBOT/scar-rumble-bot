@@ -1,8 +1,6 @@
-// Complete SUI Cars Rumble Bot with Persistent $SCAR Points
 require('dotenv').config();
-
-
 const fs = require('fs');
+const express = require('express');
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, Collection, Routes, REST, SlashCommandBuilder } = require('discord.js');
 
 const client = new Client({
@@ -42,62 +40,69 @@ const trackThemes = [
     { name: "Asphalt Jungle", emoji: "🌴" }
 ];
 
-    client.once('ready', async () => {
-        console.log(`Logged in as ${client.user.tag}`);
+client.once('ready', async () => {
+    console.log(`Logged in as ${client.user.tag}`);
 
-        const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
+    const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
 
-        // Clear Global Commands
-        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
-        console.log('Cleared Global Commands');
+    // Clear Global Commands
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    console.log('Cleared Global Commands');
 
-        // Register Guild Commands
-        const commands = [
-            new SlashCommandBuilder()
-                .setName('startscar')
-                .setDescription('Start a SUI Cars Rumble')
-                .addIntegerOption(option => option.setName('time').setDescription('Countdown time in seconds').setRequired(true))
-                .addRoleOption(option => option.setName('role').setDescription('Allowed role to participate').setRequired(true))
-                .addStringOption(option => option.setName('track').setDescription('Track Theme').addChoices(
-                    { name: 'Tokyo Drift', value: 'Tokyo Drift' },
-                    { name: 'Desert Rally', value: 'Desert Rally' },
-                    { name: 'Space Race', value: 'Space Race' },
-                    { name: 'Thunder Speedway', value: 'Thunder Speedway' },
-                    { name: 'Neon Drift Arena', value: 'Neon Drift Arena' },
-                    { name: 'Turbo Tunnel', value: 'Turbo Tunnel' },
-                    { name: 'Velocity Circuit', value: 'Velocity Circuit' },
-                    { name: 'Asphalt Jungle', value: 'Asphalt Jungle' }
-                ).setRequired(false))
-                .addRoleOption(option => option.setName('scarrole').setDescription('SCAR Role to assign (optional)').setRequired(false))
-                .addIntegerOption(option => option.setName('points').setDescription('$SCAR points to award winner (optional)').setRequired(false)),
-            new SlashCommandBuilder()
-                .setName('leaderboard')
-                .setDescription('Show $SCAR Points Leaderboard'),
-            new SlashCommandBuilder()
-                .setName('myscar')
-                .setDescription('Check your $SCAR balance')
-        ].map(cmd => cmd.toJSON());
+    // Register Guild Commands
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('startscar')
+            .setDescription('Start a SUI Cars Rumble')
+            .addIntegerOption(option => option.setName('time').setDescription('Countdown time in seconds').setRequired(true))
+            .addStringOption(option => option.setName('roles').setDescription('Mention allowed roles (separate with space)').setRequired(true))
+            .addStringOption(option => option.setName('track').setDescription('Track Theme').addChoices(
+                { name: 'Tokyo Drift', value: 'Tokyo Drift' },
+                { name: 'Desert Rally', value: 'Desert Rally' },
+                { name: 'Space Race', value: 'Space Race' },
+                { name: 'Thunder Speedway', value: 'Thunder Speedway' },
+                { name: 'Neon Drift Arena', value: 'Neon Drift Arena' },
+                { name: 'Turbo Tunnel', value: 'Turbo Tunnel' },
+                { name: 'Velocity Circuit', value: 'Velocity Circuit' },
+                { name: 'Asphalt Jungle', value: 'Asphalt Jungle' }
+            ).setRequired(false))
+            .addRoleOption(option => option.setName('scarrole').setDescription('SCAR Role to assign (optional)').setRequired(false))
+            .addIntegerOption(option => option.setName('points').setDescription('$SCAR points to award winner (optional)').setRequired(false)),
+        new SlashCommandBuilder()
+            .setName('leaderboard')
+            .setDescription('Show $SCAR Points Leaderboard'),
+        new SlashCommandBuilder()
+            .setName('myscar')
+            .setDescription('Check your $SCAR balance')
+    ].map(cmd => cmd.toJSON());
 
-      //  await rest.put(
-         //   Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-        //    { body: commands }
-       // );
+    // Uncomment to register in GUILD only (safe during dev)
+    // await rest.put(Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID), { body: commands });
 
-        console.log('Slash Commands Registered');
-    });
+    // For Global Commands (takes 1hr+ to propagate)
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
 
-
+    console.log('Slash Commands Registered');
+});
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
 
     if (interaction.commandName === 'startscar') {
         const countdown = interaction.options.getInteger('time');
-        const allowedRole = interaction.options.getRole('role');
-        let trackName = interaction.options.getString('track');
+        const rolesInput = interaction.options.getString('roles');
         const scarRole = interaction.options.getRole('scarrole');
         const scarPointReward = interaction.options.getInteger('points') || 0;
 
+        // Parse role mentions
+        const roleMentions = rolesInput.match(/<@&(\d+)>/g);
+        if (!roleMentions) {
+            return interaction.reply('⚠️ No valid roles mentioned. Please mention roles like @Role1 @Role2');
+        }
+
+        const allowedRoleIds = roleMentions.map(mention => mention.match(/\d+/)[0]);
+
+        let trackName = interaction.options.getString('track');
         if (!trackName) {
             const randomTrack = trackThemes[Math.floor(Math.random() * trackThemes.length)];
             trackName = `${randomTrack.emoji} ${randomTrack.name}`;
@@ -112,7 +117,7 @@ client.on('interactionCreate', async interaction => {
 ⏳ **Starts in:** ${countdown} seconds
 
 React with 🏁 to join!
-Only members with ${allowedRole} can participate.`)
+Only members with ${roleMentions.join(' ')} can participate.`)
             .setColor(0x00FF00);
 
         const reply = await interaction.reply({ embeds: [embed] });
@@ -137,7 +142,15 @@ React to the original message above with 🏁 to participate in the SUI Cars Rum
             await interaction.followUp({ embeds: [updatedEmbed] });
         }, 30000);
 
-        const reactionFilter = (reaction, user) => reaction.emoji.name === '🏁' && !user.bot && interaction.guild.members.cache.get(user.id).roles.cache.has(allowedRole.id);
+        const reactionFilter = (reaction, user) => {
+            if (reaction.emoji.name !== '🏁' || user.bot) return false;
+
+            const member = interaction.guild.members.cache.get(user.id);
+            if (!member) return false;
+
+            return member.roles.cache.some(role => allowedRoleIds.includes(role.id));
+        };
+
         const reactionCollector = rumbleMessage.createReactionCollector({ filter: reactionFilter, time: countdown * 1000 });
 
         const participants = new Collection();
@@ -249,14 +262,9 @@ async function startRumble(interaction, participants, trackTheme, scarRoleId, sc
 }
 
 client.login(process.env.BOT_TOKEN);
-const express = require('express');
+
+// Express keepalive server
 const app = express();
-
-app.get('/', (req, res) => {
-    res.send('Bot is Running!');
-});
-
+app.get('/', (req, res) => res.send('Bot is Running!'));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Express server is running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Express server is running on port ${PORT}`));
